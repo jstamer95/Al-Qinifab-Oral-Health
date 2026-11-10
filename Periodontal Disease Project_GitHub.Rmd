@@ -1,0 +1,1000 @@
+---
+title: "Oral Disease at Al-Qinifab: A Reassessment of the Saso and Kondo (2019) Method"
+author: "Julianne Stamer"
+date: "2026-11-10"
+output: html_document
+---
+
+```{r setup, warning=FALSE, message=FALSE, results="hide", echo=FALSE}
+
+##set up chunk with necessary packages and data file (.csv) saved on GitHub
+
+library(tidyverse) #needed for pipes etc
+library(corrplot) #makes a correlation plot
+library(car) #regression diagnostics
+library(lmtest) #regression diagnostics 
+library(factoextra) #visualization for PCAs
+
+stamer.perio.disease <- read.csv("https://github.com/jstamer95/Al-Qinifab-Oral-Health/blob/main/Stamer%20clean%20data%20all%20no%20missing.csv",
+  header = TRUE)
+stamer.perio.disease <-data.frame(stamer.perio.disease)
+stamer.perio.disease
+
+```
+
+##setting up the summary tables used in the manuscript##########################
+
+```{r}
+#Table 1
+
+table_1 <- stamer.perio.disease %>%
+  count(time.period) %>%
+  mutate(
+    percent = round(n / sum(n) * 100),
+    time.period = case_when(
+      time.period == 4 ~ "Christian Period or Later",
+      time.period == 3 ~ "Christian Period",
+      time.period == 2 ~ "Post-Meroitic",
+      time.period == 1 ~ "Late Meroitic/Post-Meroitic",
+      TRUE ~ as.character(time.period)
+    )
+  )
+
+table_1
+```
+
+```{r}
+#Table 3
+
+periodontal_groups <- bind_rows(
+  
+  # Total sample
+  stamer.perio.disease %>%
+    mutate(
+      group_type = "1_Total",
+      group = "Total"
+    ),
+  
+  # Sex groups
+  stamer.perio.disease %>%
+    mutate(
+      group_type = "2_Sex",
+      group = case_when(
+        sex.cat == 1 ~ "Males",
+        sex.cat == 2 ~ "Females",
+        TRUE ~ "Unknown sex"
+      )
+    ),
+  
+  # Time-period groups
+  stamer.perio.disease %>%
+    mutate(
+      group_type = "3_Time period",
+      group = case_when(
+        time.period == 1 ~ "Late Meroitic/Post-Meroitic",
+        time.period == 2 ~ "Post-Meroitic",
+        time.period == 3 ~ "Christian Period",
+        time.period == 4 ~ "Christian Period or Later",
+        TRUE ~ "Unknown time period"
+      )
+    )
+)
+
+periodontal_results <- periodontal_groups %>%
+  group_by(group_type, group) %>%
+  summarise(
+    group_n = n_distinct(Individual),
+    
+    cej_observed = sum(!is.na(cej.ac)),
+    cej_affected = sum(cej.ac >= 2, na.rm = TRUE),
+    cej_percent = round(cej_affected / cej_observed * 100),
+    mean_cej = mean(cej.ac, na.rm = TRUE),
+    
+    septum_observed = sum(!is.na(inter.septum)),
+    septum_affected = sum(inter.septum >= 3, na.rm = TRUE),
+    septum_percent = round(
+      septum_affected / septum_observed * 100
+    ),
+    mean_septum = mean(inter.septum, na.rm = TRUE),
+    
+    .groups = "drop"
+  )
+
+table_3 <- periodontal_results %>%
+  arrange(group_type, group) %>%
+  transmute(
+    Group = paste0(group, " (n=", group_n, ")"),
+    
+    `Percentage with CEJ-AC scores above 2` =
+      paste0(
+        cej_percent, "% (",
+        cej_affected, "/", cej_observed, ")"
+      ),
+    
+    `Average CEJ-AC score` =
+      sprintf("%.2f", mean_cej),
+    
+    `Percentage with interdental septum scores above 3` =
+      paste0(
+        septum_percent, "% (",
+        septum_affected, "/", septum_observed, ")"
+      ),
+    
+    `Average interdental septum score` =
+      sprintf("%.2f", mean_septum)
+  )
+
+table_3
+
+```
+
+```{r}
+
+#table 4
+caries_results <- periodontal_groups %>%
+  group_by(group_type, group) %>%
+  summarise(
+    group_n = n_distinct(Individual),
+
+    caries_observed = sum(!is.na(caries)),
+    caries_affected = sum(caries == 2, na.rm = TRUE),
+
+    caries_percent = round(
+      caries_affected / caries_observed * 100
+    ),
+
+    mean_RC = mean(RC, na.rm = TRUE),
+
+    .groups = "drop"
+  )
+
+table_4 <- caries_results %>%
+  mutate(
+    group = factor(
+      group,
+      levels = c(
+        "Total",
+        "Males",
+        "Females",
+        "Late Meroitic/Post-Meroitic",
+        "Post-Meroitic",
+        "Christian Period",
+        "Christian Period or Later"
+      )
+    )
+  ) %>%
+  arrange(group_type, group) %>%
+  transmute(
+    Group = paste0(group, " (n=", group_n, ")"),
+
+    `Percentage of individuals with carious lesions` =
+      paste0(
+        caries_percent,
+        "% (",
+        caries_affected,
+        ")"
+      ),
+
+    `Caries Rate (RC)` = sprintf("%.2f", mean_RC)
+  )
+
+table_4
+```
+
+```{r}
+
+##table 5
+
+amtl_results <- periodontal_groups %>%
+  group_by(group_type, group) %>%
+  summarise(
+    group_n = n_distinct(Individual),
+
+    amtl_observed = sum(!is.na(AMTL)),
+    amtl_affected = sum(AMTL > 0, na.rm = TRUE),
+
+    amtl_percent = round(
+      amtl_affected / amtl_observed * 100
+    ),
+
+    mean_AMTL = mean(AMTL, na.rm = TRUE),
+
+    .groups = "drop"
+  )
+table_5 <- amtl_results %>%
+  mutate(
+    group = factor(
+      group,
+      levels = c(
+        "Total",
+        "Males",
+        "Females",
+        "Late Meroitic/Post-Meroitic",
+        "Post-Meroitic",
+        "Christian Period",
+        "Christian Period or Later"
+      )
+    )
+  ) %>%
+  arrange(group_type, group) %>%
+  transmute(
+    Group = paste0(group, " (n=", group_n, ")"),
+
+    `Percentage of individuals with AMTL` =
+      paste0(
+        amtl_percent, "% (",
+        amtl_affected, ")"
+      ),
+
+    `AMTL Rate` = sprintf("%.2f", mean_AMTL)
+  )
+
+table_5
+
+```
+
+```{r}
+
+##table 6
+dental_wear_results <- periodontal_groups %>%
+  group_by(group_type, group) %>%
+  summarise(
+    group_n = n_distinct(Individual),
+
+    wear_observed = sum(!is.na(adw)),
+    mean_dental_wear = mean(adw, na.rm = TRUE),
+
+    .groups = "drop"
+  )
+table_6 <- dental_wear_results %>%
+  mutate(
+    group = factor(
+      group,
+      levels = c(
+        "Total",
+        "Males",
+        "Females",
+        "Late Meroitic/Post-Meroitic",
+        "Post-Meroitic",
+        "Christian Period",
+        "Christian Period or Later"
+      )
+    )
+  ) %>%
+  arrange(group_type, group) %>%
+  transmute(
+    Group = paste0(group, " (n=", group_n, ")"),
+
+    `Average Dental Wear` =
+      sprintf("%.2f", mean_dental_wear)
+  )
+
+table_6
+
+```
+
+```{r}
+##Table 7
+chipping_results <- periodontal_groups %>%
+  group_by(group_type, group) %>%
+  summarise(
+    group_n = n_distinct(Individual),
+
+    chipping_observed = sum(!is.na(chipping)),
+    mean_chipping = mean(chipping, na.rm = TRUE),
+
+    .groups = "drop"
+  )
+
+table_7 <- chipping_results %>%
+  mutate(
+    group = factor(
+      group,
+      levels = c(
+        "Total",
+        "Males",
+        "Females",
+        "Late Meroitic/Post-Meroitic",
+        "Post-Meroitic",
+        "Christian Period",
+        "Christian Period or Later"
+      )
+    )
+  ) %>%
+  arrange(group_type, group) %>%
+  transmute(
+    Group = paste0(
+      group,
+      " (n=", chipping_observed, ")",
+      if_else(chipping_observed < group_n, "*", "")
+    ),
+
+    `Average Chipping Score` =
+      sprintf("%.2f", mean_chipping)
+  )
+
+table_7
+```
+################################################################################
+
+##Figure 3: Age Distribution####################################################
+```{r}
+#Figure 3
+
+age_distribution <- stamer.perio.disease %>%
+  filter(!is.na(age.cat)) %>%
+  mutate(
+    age_category = factor(
+      age.cat,
+      levels = c(1, 2, 3, 4),
+      labels = c(
+      "Young adult\n(20–30 years old)",
+        "Early middle-aged\n(30–45 years old)",
+        "Late middle-aged\n(45–60 years old)",
+        "Elderly\n(over 60 years old)"
+      )
+    )
+  ) %>%
+  count(age_category, name = "n", .drop = FALSE) %>%
+  mutate(
+    percent = n / sum(n) * 100
+  )
+
+age_distribution
+
+
+age_distribution_plot <- ggplot(
+  age_distribution,
+  aes(x = age_category, y = n)
+) +
+  geom_col(
+    fill = "#4472C4",
+    width = 0.7
+  ) +
+  geom_text(
+    aes(
+      label = paste0(
+        n, " (",
+        round(percent), "%)"
+      )
+    ),
+    vjust = -0.4,
+    size = 4
+  ) +
+  labs(
+    x = "Age Category",
+    y = "Number of Individuals",
+    title = "Age Distribution of the Study Sample"
+  ) +
+  expand_limits(
+    y = max(age_distribution$n) * 1.12
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(
+      angle = 30,
+      hjust = 1
+    )
+  )
+
+age_distribution_plot
+
+ggsave("Figure_3 Age Distribution.png",
+       age_distribution_plot,
+       height = 5,
+       width = 8,
+       dpi = 400)
+```
+################################################################################
+
+##Figure 4:correlation matrix###################################################
+```{r echo=FALSE, fig.height=6, fig.width=6}
+##Figure 4: correlation matrix
+  ##interdental septum high correlation with wear, cej-ac distance, AMTL, abscesses
+  ##average wear related to age, AMTL, cej-ac, chipping
+  ##caries rate (RC) has higher correlation with AMTL and sex than does caries y or n alone, this makes me think RC is a better measure for this type of analysis
+  ##chipping has some interesting relationships with age (increasing), time period (increasing over time), and is more severe in females (1) than males (2)
+
+
+
+corrplot(cor(stamer.perio.disease[, 2:14]), diag = FALSE, type = "upper", addCoef.col = 'black')
+
+#not a gg object, so I just exported it
+  
+```
+################################################################################
+
+
+##Predicting Interdental Septum Morphology######################################
+
+  ##first, how well does ADW predict interdental septum morphology?
+
+```{r echo=FALSE}
+
+#fit is a function that describes the relationship between interdental septum and average dental wear; the next chunk contains a visual representation of this relationship but the first panel has a numeric representation
+fit <- with(stamer.perio.disease, lm(inter.septum~adw))
+summary(fit)
+plot(fit)
+
+
+with(stamer.perio.disease, bptest(fit))
+
+##the relationship between these two variables explains 25.59% of the variation (adjusted r-squared)
+
+
+```
+
+```{r echo=FALSE}
+##this is the model that shows the positive relationship between interdental septum and tooth wear for the entire sample
+stamer.perio.disease %>% ggplot(aes(y = inter.septum, x = adw)) +
+  geom_smooth(method = 'lm', color = 'red') + 
+  geom_point(color = 'blue')+
+  xlab("Average Dental Wear")+
+  ylab("Interdental Septum Morphology")+
+  ggtitle("Predicting Interdental Septum Morphology from Average Dental Wear") +
+  theme(plot.title = element_text(hjust = 0.5))
+  
+```
+
+  ##now using the AIC method to create a multiple linear regression model that explains the most variation
+
+```{r}
+##Step 1: Modeling all Relationships
+  ##predicting interdental septum morphology from all variables (leaving out caries presence to avoid using the same data twice since I think RC is a better measure)
+
+fit.all.inter.septum <- lm(inter.septum~adw+cej.ac+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+time.period, data = stamer.perio.disease)
+summary(fit.all.inter.septum)
+plot(fit.all.inter.septum)
+
+```
+
+```{r echo=FALSE}
+##Step 2: Creating the null model for AIC
+
+lm.null.inter.septum <- lm(inter.septum~1, data = stamer.perio.disease)
+summary(lm.null.inter.septum)
+```
+
+```{r echo=FALSE}
+##Step 3: AIC method forward, building from the null model
+
+AIC.forward.inter.septum <- step(lm.null.inter.septum, 
+                    direction='forward', 
+                    scope= ~adw+cej.ac+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+time.period)
+summary(AIC.forward.inter.septum)
+```
+
+```{r echo=FALSE}
+##Step 4: AIC method backward, taking away from the model with all variables
+
+AIC.backward.inter.septum <- step(fit.all.inter.septum, 
+                    direction='backward', 
+                    scope= ~adw+cej.ac+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+time.period)
+summary(AIC.backward.inter.septum)
+```
+
+```{r echo=FALSE}
+##Step 5: AIC method in both directions
+
+AIC.both.inter.septum <- step(lm.null.inter.septum, 
+                    direction='both', 
+                    scope= ~adw+cej.ac+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+time.period)
+summary(AIC.both.inter.septum)
+
+plot(AIC.both.inter.septum)
+
+```
+  ##all three AIC methods produced the same answer so I am confident that this model is best
+
+```{r echo=FALSE}
+sqrt(vif(AIC.both.inter.septum)) 
+```
+  ## plotting the model 
+```{r}
+
+fit.inter.septum <- lm(formula = inter.septum ~ adw + abcesses + AMTL, data = stamer.perio.disease)
+summary(fit.inter.septum )
+plot(fit.inter.septum )
+
+##multiple linear regression between interdental septum and ADW, abscesses, and AMTL explains 35.03% of variation (these three variables contribute the most to the severity of inflammation of the gums)
+```
+
+```{r}
+##Figure 5: Multiple linear regression predicting interdental septum morphology
+figure_5 <- stamer.perio.disease %>% ggplot(aes(y = inter.septum, x = fit.inter.septum$fitted.values)) +
+  geom_smooth(method = 'lm') + 
+  geom_point() +
+  labs(title="Predicting Interdental Septum Morphology from 
+       Average Dental Wear, AMTL, and Abscesses, r=0.3503")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  xlab("Average Dental Wear, AMTL, and Abscesses")+
+  ylab("Interdental Septum Morphology")
+
+##could it be that the few cases of a really high interdental septum score are driven by high AMTL, wear, and abscess scores? Could I show that individuals who bby definition have periodontal disease have a different relationship with these variables than those who do not? 
+
+```
+  ##multiple linear regression between interdental septum and ADW, abscesses, and AMTL explains 35.03% of variation (these three variables contribute the most to the severity of inflammation of the gums)
+
+################################################################################
+
+
+
+#CEJ-AC distance################################################################
+
+
+  ##now using the AIC method to create a multiple linear regression model that explains the most variation
+
+```{r}
+##Step 1: Modeling all Relationships
+  ##predicting eCEJ-AC distance from all variables (leaving out caries presence to avoid using the same data twice since I think RC is a better measure)
+
+fit.all.CEJ.AC <- lm(cej.ac~adw+inter.septum+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+time.period, data = stamer.perio.disease)
+summary(fit.all.CEJ.AC)
+plot(fit.all.CEJ.AC)
+
+```
+
+```{r echo=FALSE}
+##Step 2: Creating the null model for AIC
+
+lm.null.CEJ.AC <- lm(cej.ac~1, data = stamer.perio.disease)
+summary(lm.null.CEJ.AC)
+```
+
+```{r echo=FALSE}
+##Step 3: AIC method forward, building from the null model
+
+AIC.forward.CEJ.AC <- step(lm.null.CEJ.AC, 
+                    direction='forward', 
+                    scope= ~adw+inter.septum+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+time.period)
+summary(AIC.forward.CEJ.AC)
+```
+
+```{r echo=FALSE}
+##Step 4: AIC method backward, taking away from the model with all variables
+
+AIC.backward.CEJ.AC <- step(fit.all.CEJ.AC, 
+                    direction='backward', 
+                    scope= ~adw+inter.septum+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+time.period)
+summary(AIC.backward.CEJ.AC)
+```
+
+```{r echo=FALSE}
+##Step 5: AIC method in both directions
+
+AIC.both.CEJ.AC <- step(lm.null.CEJ.AC, 
+                    direction='both', 
+                    scope= ~adw+inter.septum+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+time.period)
+summary(AIC.both.CEJ.AC)
+
+plot(AIC.both.CEJ.AC)
+
+```
+##all three AIC methods produced the same answer so I am confident that this model is best
+
+```{r echo=FALSE}
+sqrt(vif(AIC.both.CEJ.AC)) 
+```
+## plotting the model 
+```{r}
+
+fit.CEJ.AC <- lm(formula = cej.ac ~ AMTL + adw + sex.cat + chipping, data = stamer.perio.disease)
+summary(fit.CEJ.AC)
+plot(fit.CEJ.AC)
+
+##multiple linear regression between CEJ-AC distance and AMTL, ADW, and sex explains 31.32% of variation (these three variables contribute the most to the resorption of the alveolar bone)
+```
+
+```{r}
+##Figure 6: Multiple linear regression predicting CEJ-AC distance
+figure_6 <- stamer.perio.disease %>% 
+  ggplot(aes(y = cej.ac, x = fit.CEJ.AC$fitted.values)) +
+  geom_smooth(method = 'lm') + 
+  geom_point() +
+  labs(title="Predicting CEJ-AC Distance from 
+       AMTL, Average Dental Wear, and Estimated Sex, r=0.3132")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  xlab("AMTL, Average Dental Wear, and Estimated Sex")+
+  ylab("CEJ-AC Distance")
+
+figure_6
+
+```
+################################################################################
+
+#PCA Analysis###################################################################
+
+
+
+
+```{r }
+pca <- prcomp(stamer.perio.disease[,2:14]) 
+summary(pca)
+
+##PCA
+```
+
+```{r fig.height=6, fig.width=6}
+plot(pca) # Scree plot
+biplot(pca)
+```
+
+```{r fig.height=4, fig.width=6}
+fviz_pca_ind(pca,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             label = 'none',
+             repel = TRUE,     # Avoid text overlapping
+             pointsize = 4, 
+             ggtheme = theme_bw(base_size = 18))
+
+fviz_pca_ind(pca,
+             label = 'none',
+             habillage = as.factor(stamer.perio.disease$time.period),
+             addEllipses = TRUE,
+             pointsize = 4, 
+             ggtheme = theme_bw(base_size = 18))
+
+fviz_pca_ind(pca,
+             label = 'none',
+             habillage = as.factor(stamer.perio.disease$sex.cat),
+             addEllipses = TRUE,
+             pointsize = 4, 
+             ggtheme = theme_bw(base_size = 18))
+
+fviz_pca_ind(pca,
+             label = 'none',
+             habillage = as.factor(stamer.perio.disease$age.cat),
+             addEllipses = TRUE,
+             pointsize = 4, 
+             ggtheme = theme_bw(base_size = 18))
+```
+
+```{r fig.height=5, fig.width=6}
+figure_7 <- fviz_pca_var(pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             geom.var = c('arrow', 'text'),
+             repel = TRUE,     # Avoid text overlapping
+             labelsize = 4,
+             title = "PCA Variables for Components 1 & 2", 
+             ggtheme = theme_bw(base_size = 18))
+figure_7
+
+ggsave(
+  "Figure_7_PCA.jpg",
+  figure_7,
+  height = 7,
+  width = 7,
+  dpi = 400
+)
+
+fviz_pca_var(pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             axes = c(1,3), 
+             geom.var = c('arrow', 'text'),
+             repel = TRUE,     # Avoid text overlapping
+             labelsize = 4,
+             title = "PCA Variables for Components 1 & 3", 
+             ggtheme = theme_bw(base_size = 18))
+
+fviz_pca_var(pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             axes = c(2,3), 
+             geom.var = c('arrow', 'text'),
+             repel = TRUE,     # Avoid text overlapping
+             labelsize = 4,
+             title = "PCA Variables for Components 2 & 3", 
+             ggtheme = theme_bw(base_size = 18))
+
+##plotting pca more aesthetically pleasing
+```  
+
+##Sex Based Differences
+
+##now using the AIC method to create a multiple linear regression model that explains the most variation
+
+```{r}
+##Step 1: Modeling all Relationships
+  ##predicting CEJ-AC distance from all variables (leaving out caries presence to avoid using the same data twice since I think RC is a better measure)
+
+fit.all.sex.cat <- lm(sex.cat~adw+inter.septum+RC+AMTL+chipping+abcesses+groove+age.cat+cej.ac+time.period, data = stamer.perio.disease)
+summary(fit.all.sex.cat)
+plot(fit.all.sex.cat)
+
+```
+################################################################################
+
+##Sex?##########################################################################
+```{r echo=FALSE}
+##Step 2: Creating the null model for AIC
+
+lm.null.sex.cat <- lm(sex.cat~1, data = stamer.perio.disease)
+summary(lm.null.sex.cat)
+```
+
+```{r echo=FALSE}
+##Step 5: AIC method in both directions
+
+AIC.both.sex.cat <- step(lm.null.sex.cat, 
+                    direction='both', 
+                    scope= ~adw+inter.septum+RC+AMTL+chipping+abcesses+groove+age.cat+cej.ac+time.period)
+summary(AIC.both.sex.cat)
+
+plot(AIC.both.sex.cat)
+
+```
+
+## plotting the model 
+```{r}
+
+fit.sex <- lm(formula = sex.cat ~ chipping + cej.ac + abcesses + RC, data = stamer.perio.disease)
+summary(fit.sex)
+plot(fit.sex)
+
+##multiple linear regression between estimated sex and chipping CEJ-Ac distance, abcesses, and caries rate explains 20.03% of variation 
+```
+
+```{r}
+##plotting the relationship visually
+stamer.perio.disease %>% ggplot(aes(y = sex.cat, x = fit.sex$fitted.values)) +
+  geom_smooth(method = 'lm') + 
+  geom_point() +
+  labs(title="Predicting Estimated Sex from 
+       Tooth Chipping, CEJ-AC Distance, Abcesses, and Caries Rate, r=0.2003")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  xlab("Tooth Chipping, CEJ-AC Distance, Abcesses, and Caries Rate")+
+  ylab("Estimated Sex (female =1; male =2)")
+
+##not a lot of difference; cultural changes are not an influence dietary factors
+
+```
+
+```{r fig.height=6, fig.width=8}
+boxplot(RC~sex.cat, data = stamer.perio.disease, horizontal = FALSE, varwidth = TRUE, notch = TRUE, col = 'light blue', main = 'Carious Lesions Range by Estimated Sex', cex.main = 2, cex = 1.5, cex.axis = 1.5, cex.lab = 2, ylab = 'Caries Rate', xlab = 'Estimated Sex', )
+```
+
+```{r fig.height=6, fig.width=6}
+boxplot(AMTL~sex.cat, data = stamer.perio.disease, horizontal = FALSE, varwidth = TRUE, notch = FALSE, col = 'light blue', main = 'AMTL Rate by Estimated Sex', cex.main = 2, cex = 1.5, cex.axis = 1.5, cex.lab = 1.5, ylab = 'AMTL Rate', xlab = 'Estimated Sex' )
+```
+
+```{r fig.height=6, fig.width=8}
+boxplot(cej.ac~sex.cat, data = stamer.perio.disease, horizontal = FALSE, varwidth = TRUE, notch = TRUE, col = 'light blue', main = 'CEJ-AC Distance by Estimated Sex', cex.main = 2, cex = 1.5, cex.axis = 1.5, cex.lab = 1.5, ylab = 'CEJ-AC Distance', xlab = 'Estimated Sex')
+```
+
+```{r fig.height=6, fig.width=8}
+boxplot(inter.septum~sex.cat, data = stamer.perio.disease, horizontal = FALSE, varwidth = TRUE, notch = TRUE, col = 'light blue', main = 'Interdental Septum Morphology by Estimated Sex', cex.main = 2, cex = 1.5, cex.axis = 1.5, cex.lab = 1.5, ylab = 'Interdental Septum Morphology', xlab = 'Estimated Sex')
+```
+
+```{r fig.height=6, fig.width=6}
+boxplot(adw~sex.cat, data = stamer.perio.disease, horizontal = FALSE, varwidth = TRUE, notch = FALSE, col = 'light blue', main = 'Average Dental Wear by Estimated Sex', cex.main = 2, cex = 1.5, cex.axis = 1.5, cex.lab = 1.5, ylab = 'Average Dental Wear Score', xlab = 'Estimated Sex' )
+```
+
+```{r fig.height=6, fig.width=6}
+boxplot(RC~sex.cat, data = stamer.perio.disease, horizontal = FALSE, varwidth = TRUE, notch = FALSE, col = 'light blue', main = 'Caries Rate by Estimated Sex', cex.main = 2, cex = 1.5, cex.axis = 1.5, cex.lab = 1.5, ylab = 'Caries Rate', xlab = 'Estimated Sex' )
+```
+
+```{r fig.height=6, fig.width=6}
+boxplot(chipping~sex.cat, data = stamer.perio.disease, horizontal = FALSE, varwidth = TRUE, notch = FALSE, col = 'light blue', main = 'Chipping Rate by Estimated Sex', cex.main = 2, cex = 1.5, cex.axis = 1.5, cex.lab = 1.5, ylab = 'Chipping Rate', xlab = 'Estimated Sex' )
+```
+
+```{r fig.height=6, fig.width=6}
+boxplot(abcesses~sex.cat, data = stamer.perio.disease, horizontal = FALSE, varwidth = TRUE, notch = FALSE, col = 'light blue', main = 'Abscesses by Estimated Sex', cex.main = 2, cex = 1.5, cex.axis = 1.5, cex.lab = 1.5, ylab = 'Abscesses', xlab = 'Estimated Sex' )
+```
+
+##time period assoc.
+
+```{r}
+##Step 1: Modeling all Relationships
+  ##predicting time period
+
+fit.all.inter.time.period <- lm(time.period~inter.septum+adw+cej.ac+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat, data = stamer.perio.disease)
+summary(fit.all.inter.time.period)
+plot(fit.all.inter.time.period)
+
+```
+
+```{r echo=FALSE}
+##Step 2: Creating the null model for AIC
+
+lm.null.time.period <- lm(time.period~1, data = stamer.perio.disease)
+summary(lm.null.time.period)
+```
+
+```{r echo=FALSE}
+##Step 5: AIC method in both directions
+
+AIC.both.time.period <- step(lm.null.time.period, 
+                    direction='both', 
+                    scope= ~adw+cej.ac+RC+AMTL+chipping+abcesses+groove+age.cat+sex.cat+inter.septum)
+summary(AIC.both.time.period)
+
+plot(AIC.both.time.period)
+
+```
+
+## plotting the model 
+```{r}
+
+fit.time.period <- lm(formula = time.period ~ chipping, data = stamer.perio.disease)
+summary(fit.time.period)
+plot(fit.time.period)
+
+##not even worth talking about only explains 6% of the variation
+```
+################################################################################
+
+#Chi Squared Tests of Significance##############################################
+```{r}
+statistical_test_data <- stamer.perio.disease %>%
+  mutate(
+    sex = factor(
+      sex.cat,
+      levels = c(1, 2),
+      labels = c("Male", "Female")
+    ),
+
+    septum_y_n = factor(
+      inter.septum >= 3,
+      levels = c(FALSE, TRUE),
+      labels = c("Absent", "Present")
+    ),
+
+    cej_y_n = factor(
+      cej.ac >= 2,
+      levels = c(FALSE, TRUE),
+      labels = c("Absent", "Present")
+    ),
+
+    caries_present = factor(
+      caries == 2,
+      levels = c(FALSE, TRUE),
+      labels = c("Absent", "Present")
+    ),
+
+    amtl_present = factor(
+      AMTL > 0,
+      levels = c(FALSE, TRUE),
+      labels = c("Absent", "Present")
+    )
+  )
+#is the difference in periodontal disease rates significant between the two measures?
+perio.difference <- with(
+  statistical_test_data ,
+  table(
+    CEJ_AC = cej_y_n,
+    Interdental_septum = septum_y_n
+  )
+)
+perio.difference
+addmargins(perio.difference)
+
+perio.difference.test <- mcnemar.test(perio.difference)
+perio.difference.test
+
+#is the interdental septum different based on sex
+inter.sex <- with(
+  statistical_test_data,
+  table(
+    Sex = sex,
+    Interdental_septum = septum_y_n
+  )
+)
+
+inter.sex
+addmargins(inter.sex)
+
+inter.sex.test <- chisq.test(inter.sex)
+
+inter.sex.test
+
+#is CEJ_AC difference based on sex
+cej.sex <- with(
+  statistical_test_data,
+  table(
+    Sex = sex,
+    CEJ_AC = cej_y_n
+  )
+)
+
+cej.sex
+addmargins(cej.sex)
+
+cej.sex.test <- chisq.test(cej.sex)
+
+cej.sex.test
+
+
+#caries/sex
+caries.sex <- with(
+  statistical_test_data,
+  table(
+    Sex = sex,
+    Caries = caries_present
+  )
+)
+
+caries.sex
+addmargins(caries.sex)
+
+caries.sex.test <- chisq.test(caries.sex)
+
+caries.sex.test
+
+#AMTL/sex
+amtl.sex <- with(
+  statistical_test_data,
+  table(
+    Sex = sex,
+    AMTL = amtl_present
+  )
+)
+
+amtl.sex
+addmargins(amtl.sex)
+
+amtl.sex.test <- chisq.test(amtl.sex)
+
+amtl.sex.test
+
+#wear/sex
+wear.sex.test <- wilcox.test(
+  adw ~ sex,
+  data = statistical_test_data,
+  exact = FALSE
+)
+
+wear.sex.test
+
+#chipping/sex
+chipping.sex.test <- wilcox.test(
+  chipping ~ sex,
+  data = statistical_test_data,
+  exact = FALSE
+)
+
+chipping.sex.test
+
+statistical_test_data %>%
+  group_by(sex) %>%
+  summarise(
+    n = sum(!is.na(chipping)),
+    mean = mean(chipping, na.rm = TRUE),
+    median = median(chipping, na.rm = TRUE),
+    IQR = IQR(chipping, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#abscesses/sex
+abscesses.sex.test <- wilcox.test(
+  abcesses ~ sex,
+  data = statistical_test_data,
+  exact = FALSE
+)
+
+abscesses.sex.test
+
+
+#Bonferroni correction
+p_values <- c(
+  Caries = caries.sex.test$p.value,
+  AMTL = amtl.sex.test$p.value,
+  Dental_wear = wear.sex.test$p.value,
+  Chipping = chipping.sex.test$p.value,
+  Abscesses = abscesses.sex.test$p.value
+)
+
+adjusted_results <- data.frame(
+  Test = names(p_values),
+  Raw_p = unname(p_values),
+  Holm_p = unname(
+    p.adjust(p_values, method = "holm")
+  )
+)
+
+adjusted_results
+```
+
+################################################################################
